@@ -42,6 +42,30 @@ def windows(segs: list[pd.DataFrame], horizon: int, stride: int = 3):
     return tuple(np.concatenate(a) for a in (hd, hy, fd, fy))
 
 
+def aligned_windows(segs, horizon: int = 24, stride: int = 6):
+    """GRU windows and Burton windows over identical target steps, so the two models are
+    scored on exactly the same predictions. Burton starts one step earlier because it is
+    initialized from a single observation rather than an encoded history."""
+    acc = {k: [] for k in ("hd", "hy", "fd", "fy", "vbs", "sqp", "dst")}
+    for s in segs:
+        s = _prep(s)
+        X = np.nan_to_num(s[DRIVERS].to_numpy(np.float32))
+        y = s["dst"].to_numpy(np.float32)
+        v, q, d = (s[c].to_numpy() for c in ("vbs", "sqrt_p", "dst"))
+        n = len(s) - HISTORY - horizon
+        if n <= 0:
+            continue
+        st = np.arange(0, n, stride)
+        hi = st[:, None] + np.arange(HISTORY)[None, :]
+        fi = st[:, None] + HISTORY + np.arange(horizon)[None, :]
+        bi = st[:, None] + HISTORY - 1 + np.arange(horizon + 1)[None, :]
+        for k, a in [("hd", X[hi]), ("hy", y[hi]), ("fd", X[fi]), ("fy", y[fi]),
+                     ("vbs", v[bi][:, :horizon]), ("sqp", q[bi]), ("dst", d[bi])]:
+            acc[k].append(a)
+    c = {k: np.concatenate(v) for k, v in acc.items()}
+    return ((c["hd"], c["hy"], c["fd"], c["fy"]), (c["vbs"], c["sqp"], c["dst"]))
+
+
 class Stats:
     def __init__(self, hd, hy):
         flat = hd.reshape(-1, hd.shape[-1])

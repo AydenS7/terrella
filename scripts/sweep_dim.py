@@ -14,30 +14,9 @@ import torch
 from terrella import baselines as B
 from terrella import data as D
 from terrella import neural as N
+from terrella.neural import aligned_windows as aligned
 
 HORIZON = 24
-
-
-def aligned(segs, horizon=HORIZON, stride=6):
-    """GRU windows and Burton windows over identical target steps."""
-    acc = {k: [] for k in ("hd", "hy", "fd", "fy", "vbs", "sqp", "dst")}
-    for s in segs:
-        s = N._prep(s)
-        X = np.nan_to_num(s[N.DRIVERS].to_numpy(np.float32))
-        y = s["dst"].to_numpy(np.float32)
-        v, q, d = (s[c].to_numpy() for c in ("vbs", "sqrt_p", "dst"))
-        n = len(s) - N.HISTORY - horizon
-        if n <= 0:
-            continue
-        st = np.arange(0, n, stride)
-        hi = st[:, None] + np.arange(N.HISTORY)[None, :]
-        fi = st[:, None] + N.HISTORY + np.arange(horizon)[None, :]
-        bi = st[:, None] + N.HISTORY - 1 + np.arange(horizon + 1)[None, :]
-        for k, a in [("hd", X[hi]), ("hy", y[hi]), ("fd", X[fi]), ("fy", y[fi]),
-                     ("vbs", v[bi][:, :horizon]), ("sqp", q[bi]), ("dst", d[bi])]:
-            acc[k].append(a)
-    c = {k: np.concatenate(v) for k, v in acc.items()}
-    return ((c["hd"], c["hy"], c["fd"], c["fy"]), (c["vbs"], c["sqp"], c["dst"]))
 
 
 def rmse(pred, truth, mask=None):
