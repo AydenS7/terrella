@@ -89,6 +89,7 @@ def main():
     ap.add_argument("--dim", type=int, default=4)
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--alpha", type=float, default=1.0, help="storm-weighting strength")
     ap.add_argument("--viz", help="also dump a rich single-storm trace for the visualizer")
     args = ap.parse_args()
 
@@ -96,7 +97,8 @@ def main():
     W = {k: aligned(v, stride=6) for k, v in splits.items()}
     Wg = {k: v[0] for k, v in W.items()}
     st = N.Stats(Wg["train"][0], Wg["train"][1])
-    model, val = N.train(Wg["train"], Wg["val"], args.dim, st, epochs=args.epochs, seed=args.seed)
+    model, val = N.train(Wg["train"], Wg["val"], args.dim, st, epochs=args.epochs,
+                         seed=args.seed, alpha=args.alpha)
 
     base, base_dst = quiet_baseline(splits["train"])
     storms = find_storms([s for v in splits.values() for s in v])
