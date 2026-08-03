@@ -278,10 +278,65 @@ headline comparison survives — the margin is ~28%, not ~37%.
 And the model remains deterministic, so it still says nothing about the probability of an
 extreme event, which is the point of the whole exercise.
 
+## Storm-weighted loss, and the full record
+
+Unweighted MSE is dominated by the ~95% of hours that are quiet, so the model gets rewarded
+for hedging exactly where it matters. The diagnostic is not RMSE but the **undershoot on the
+deepest event in the test set** — how far short it falls of the one storm nobody can afford
+to miss.
+
+Weight rises linearly below Dst = −50 nT (`w = 1 + alpha` at −150, `1 + 3.5·alpha` at −400).
+Evaluation stays unweighted so runs are comparable. 3 seeds each, 24h lead:
+
+| era | alpha | train yrs | all | intense | deepest pred | **undershoot** |
+|---|---|---|---|---|---|---|
+| 1998+ | 0 | 16.3 | 8.73 ± 0.28 | 33.50 ± 3.25 | −288.2 ± 4.4 | **100.8** |
+| 1998+ | **1** | 16.3 | 8.97 ± 0.26 | **30.49 ± 2.37** | **−341.3 ± 2.5** | **47.7** |
+| 1998+ | 3 | 16.3 | 9.69 ± 0.80 | 35.32 ± 4.23 | −342.4 ± 2.8 | 46.6 |
+| 1998+ | 10 | 16.3 | 10.33 ± 0.59 | 39.70 ± 8.52 | −336.1 ± 4.2 | 52.9 |
+| **1963+** | 0 | 28.0 | 8.60 ± 0.32 | 34.75 ± 4.59 | −281.2 ± 19.6 | 107.8 |
+| **1963+** | 1 | 28.0 | 8.88 ± 0.28 | 33.02 ± 5.76 | −338.6 ± 4.3 | 50.4 |
+
+Deepest truth in the test windows: −389 nT.
+
+**alpha = 1 works.** The extreme undershoot more than halves (101 → 48 nT) and intense-storm
+RMSE *improves* (33.50 → 30.49), for about 3% on overall RMSE. Past alpha = 1 it stops helping
+and starts hurting — the deepest prediction plateaus while intense RMSE degrades.
+
+**The full 63-year record does not.** It adds 72% more training windows (22,866 → 36,350) and
+delivers nothing: every metric sits within seed noise of the 1998-only equivalent, and where a
+trend exists it is slightly *worse* on intense storms. Seed variance also rose sharply
+(±5.76 vs ±2.37 on intense; ±19.6 vs ±4.4 on the deepest prediction at alpha = 0). Pre-1998
+coverage is 55–63%, so those extra years arrive short, gappy and more interpolated, and the
+noise that injects appears to offset the extra events. **Modern-era + storm weighting is the
+configuration to keep.**
+
+### On the single hardest case
+
+Gannon, 2024-05-10 — third-deepest storm in the 63-year record, held out in test:
+
+| | deepest | miss |
+|---|---|---|
+| what actually happened | −406 nT | — |
+| learned model, storm-weighted | −346 nT | **60** |
+| learned model, plain MSE | −288 nT | 118 |
+| Burton–OM (H=1) | −253 nT | 153 |
+
+Still 60 nT short. A deterministic model has to name one number and, under uncertainty, a
+conservative number costs it less — which is the structural argument for making the transition
+probabilistic and scoring the tail instead of the point.
+
+The pre-conditioning counterfactual was re-run on the storm-weighted model and is unchanged
+(−0.2 ± 5.8 nT vs −1.0 ± 4.7), so that conclusion does not depend on the loss.
+
 ## Status
 
-Data pipeline, baselines, dimensionality sweep, and latent probe done. Next: storm-weighted
-loss, then the probabilistic transition and calibration.
+Data pipeline, baselines, dimensionality sweep, latent probe with seed stability, the
+pre-conditioning counterfactual with its Burton control, storm-weighted loss, and the
+storm-replay visualizer are all done.
+
+Next: the probabilistic transition and calibration — the only remaining path to an honest
+probability of an extreme event, which is the point of the whole exercise.
 
 ## License
 
