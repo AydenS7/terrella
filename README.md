@@ -27,10 +27,12 @@ nobody can see.
 Terrella learns it from 63 years of public NASA data.
 
 It's a state-space model: a latent state evolves under the solar wind as an exogenous
-driver, and must reconstruct every observed channel (Dst, AE, Kp) from that state alone.
-The reconstruction constraint is the point — it forces the latent toward being a
-description of the system's actual condition rather than a feature vector tuned to
-predict one number.
+driver, and the observable channels have to be reconstructed from that state alone.
+
+The current model reconstructs Dst only, which makes AE and Kp available as observables it
+has never seen — a test of whether the state describes the system's condition or is merely
+a feature vector tuned to predict one number. Reconstructing all three jointly is the
+planned next step, and would trade that test away for a stronger constraint.
 
 ## Why bother, when LSTMs already predict Dst
 
@@ -93,8 +95,9 @@ So the number of extreme events that have usable drivers attached is in the sing
 
 You cannot fit a model to three examples of a −400 nT storm. The tail has to come from
 the model's generative distribution rather than from memorized cases — which is why the
-transition is probabilistic and why calibration (spread-skill, CRPS, rank histograms) is
-a first-class requirement rather than a nice-to-have.
+transition will have to be probabilistic, and why calibration (spread-skill, CRPS, rank
+histograms) is a first-class requirement rather than a nice-to-have. The models built so
+far are deterministic and therefore cannot do this yet.
 
 ### Splits
 
@@ -154,75 +157,126 @@ identical windows, 2 seeds, 24h lead, test set:
 | GRU H=32 | 9,825 | 8.46 | 19.45 | 34.63 |
 | GRU H=64 | 31,873 | 8.37 | 19.41 | 32.56 |
 
-**The curve elbows hard at H=4 and then goes flat.** Going 1 → 2 → 4 buys 26% on intense
-storms; going 4 → 64 buys nothing, despite 52× the parameters. H=4 has the best
-intense-storm score in the entire sweep.
+**The curve elbows hard at H=4 and then goes flat.**
 
-Two separate things are visible here. At fixed H=1, replacing Burton's hand-written
-transition with a learned one is worth ~12% on intense storms — that's nonlinearity, not
+Read this table with the seed study below in hand. Each row is 2 seeds, and across 8 seeds
+at H=4 the spread is ±0.35 nT on `all`, ±1.5 on `storm`, and **±4.5 on `intense`**. So:
+
+- The 1 → 4 improvement on `all` (11.31 → 8.57) is roughly 11× the seed standard error.
+  Real, and the elbow is real.
+- The differences *among* H=4, 8, 32 and 64 are well inside seed noise. The apparent win of
+  H=4 over H=64 on intense storms is not a finding — it is two lucky seeds.
+
+So the honest claim is: **more than one dimension is needed, about four is enough, and past
+four nothing improves.** Not "four is optimal."
+
+Two separate effects are visible. At fixed H=1, replacing Burton's hand-written transition
+with a learned one is worth ~12% on intense storms — that is nonlinearity, not
 dimensionality. The 1 → 4 gain on top of that is dimensionality.
 
 ## Are those four dimensions physics, or noise?
 
-`scripts/probe.py`, three tests.
+`scripts/probe.py` runs three tests on one model. `scripts/seed_run.py` reruns them across
+8 seeds against 8 **untrained** null models, and that is what the results below report,
+because a single seed turned out to be badly misleading.
 
-**1. Impulse response.** Hold the model at a quiet equilibrium (median conditions during
-|Dst| < 20), inject 6 hours of Bz = −10 nT, release. Predicted Dst goes −14 → **−52 nT**,
-a textbook moderate storm from a textbook moderate driver. Nobody asked for that; it falls
-out of a model trained only to minimize error.
+Two methodological points, both of which changed the answer:
 
-The four dimensions respond on visibly different timescales:
+- **Latent dimensions have no identity across seeds.** The basis is arbitrary up to
+  permutation, sign and rotation, so "dimension 2 does X" cannot be checked by rerunning.
+  Everything here is either invariant to an invertible linear change of basis (partial R²,
+  impulse response) or invariant to permutation (sorted spectra).
+- **An untrained model is the null, not zero.** A random GRU driven by the same solar wind
+  is a nonlinear feature expansion of those drivers, so its state already carries a lot of
+  information about everything the drivers cause. Beating zero means nothing. Beating the
+  untrained model is the bar.
 
-| dim | peak at | e-folding decay |
+### 1. Impulse response — holds up
+
+Hold the model at a quiet equilibrium (median conditions during |Dst| < 20), inject 6 hours
+of Bz = −10 nT, release.
+
+| | trained (8 seeds) | untrained null |
 |---|---|---|
-| 0 | +5 h | 19 h |
-| 2 | +7 h | 20 h |
-| 1 | +20 h | 31 h |
-| 3 | +77 h | did not decay in 72 h |
+| Dst minimum | **−56.1 ± 4.1 nT** | −8 to −23 nT |
+| peak at | +5.5 ± 0.5 h | — |
 
-Fast responders that decay in ~19–20 h, a slower one at 31 h, and a very slow integrator.
-That is structure, not four copies of the same thing.
+A textbook moderate storm from a textbook moderate driver, arriving on a sensible timescale,
+from a model trained only to minimize error. The null gets nowhere near it, so this is a
+trained behaviour and not an artifact of the architecture.
 
-**2. Correlation with observables the model never saw.** The model is trained on Dst alone;
-AE and Kp are never shown to it, in training or at inference. Raw correlations look strong,
-but AE and Kp are themselves correlated with Dst (−0.551 and −0.596), so a dimension that
-merely tracks Dst would inherit an AE correlation for free. Partialling Dst out:
+### 2. Decay timescales — claim withdrawn
 
-| dim | AE ǀ Dst | Kp ǀ Dst |
-|---|---|---|
-| 0 | −0.326 | −0.478 |
-| 1 | +0.183 | −0.048 |
-| **2** | **−0.403** | **−0.482** |
-| 3 | −0.196 | −0.137 |
+On one seed this looked clean: dimensions decaying with e-folding times of 19 h, 20 h and
+31 h, comfortably near the ring current's 7–20 h. Across 8 seeds it evaporates —
+**17.0 ± 10.6 h, spanning 2 h to 38 h.** That is not a set of physical constants, that is
+scatter that happened to look meaningful once. There is a spread of fast and slow modes,
+which is something, but no identifiable timescale.
 
-They survive. The latent state carries information about auroral and planetary activity
-that Dst alone does not explain. Dimension 2 is the interesting one: it has the *weakest*
-raw Dst correlation (−0.187) and the *strongest* partial AE correlation, which is what a
-substorm-like, Dst-orthogonal quantity would look like.
+### 3. Information about observables the model never saw
 
-**3. Ablation.** Freeze one dimension at its mean during rollout:
+The model is trained on Dst alone; AE and Kp are never shown to it. Partial R² is the
+fraction of the target's variance, left unexplained by the controls, that the latent state
+explains. Controls are graded, because the latent is a function of recent drivers and those
+drivers also drive AE and Kp — "knows about AE" could just mean "remembers that VBs was
+recently high."
 
-| frozen dim | test RMSE | degradation |
-|---|---|---|
-| none | 8.77 | — |
-| 0 | 20.55 | +134.3% |
-| 3 | 12.70 | +44.8% |
-| 1 | 10.74 | +22.5% |
-| 2 | 10.02 | +14.3% |
+| target | control | trained | untrained null | t |
+|---|---|---|---|---|
+| AE | A: Dst | 0.340 ± 0.090 | 0.265 ± 0.100 | +1.48 |
+| AE | B: + instantaneous drivers | 0.139 ± 0.060 | 0.106 ± 0.040 | +1.20 |
+| AE | C: + lagged VBs (3/6/12/24 h) | 0.116 ± 0.051 | 0.080 ± 0.033 | +1.55 |
+| Kp | A: Dst | 0.366 ± 0.064 | 0.265 ± 0.126 | +1.89 |
+| Kp | B: + instantaneous drivers | 0.137 ± 0.045 | 0.080 ± 0.030 | +2.82 |
+| **Kp** | **C: + lagged VBs** | **0.109 ± 0.035** | **0.055 ± 0.023** | **+3.41** |
 
-All four are load-bearing. If the extra dimensions were noise, freezing them would cost
-nothing.
+Controlling only for Dst, the latent looks like it explains a third of AE — which is what an
+earlier single-seed run reported. Almost all of that is the drivers. Against the untrained
+null, **AE does not survive** (t = +1.55, not significant). **Kp does** (t = +3.41): trained
+models carry about twice the Kp information a random model does, beyond Dst, the
+instantaneous drivers, and 24 hours of driver history.
+
+That is a real but modest result. Kp is a 3-hourly planetary index; carrying information
+about it that neither Dst nor recent driving explains means the state has integrated
+something. It is not the "it discovered substorms" story the first run appeared to tell.
+
+### 4. Ablation — holds up
+
+Freeze one dimension at its mean during rollout, sorted by impact, across 8 seeds:
+
+| rank | degradation |
+|---|---|
+| 1 | +128 ± 33% |
+| 2 | +68 ± 17% |
+| 3 | +33 ± 17% |
+| 4 | +21 ± 12% |
+
+The least important dimension in the worst seed still costs +3.9%. **No dead dimensions in
+any seed** — H=4 is genuinely used, not padded.
 
 ## What is and isn't established
 
-Established: four dimensions beat one, decisively and on held-out data from a different
-solar cycle; all four carry weight; the impulse response is physically sensible; the state
-knows things about AE and Kp that Dst alone doesn't explain.
+Holds up across seeds and against the null:
 
-Not established: that the decay constants match the ring current specifically — 19–31 h sits
-at and above the usual 7–20 h band. Partial correlations of 0.3–0.5 are suggestive, not
-decisive. The probe is a single seed. And the model is deterministic, so it still cannot say
-anything about the probability of an extreme event, which is the point of the whole exercise.
+- Four dimensions beat one, decisively, on held-out data from a different solar cycle.
+- All four are load-bearing; none is decorative.
+- The impulse response is physically sensible and is a trained behaviour.
+- The state carries Kp information beyond Dst, the drivers, and driver history.
+
+Does not hold up:
+
+- **Identifiable decay timescales.** Looked like ring current on one seed; 17 ± 11 h across
+  eight.
+- **The AE result.** Survives controlling for Dst, does not survive controlling for the
+  drivers, and does not beat an untrained model.
+- **H=4 being optimal.** Within seed noise of H=8 through H=64.
+
+Also still open: honest test-set skill at H=4 is **36.4 ± 4.5 nT** on intense storms, not the
+31.67 the 2-seed sweep reported. That still clears Burton–OM's 50.68 in every seed, so the
+headline comparison survives — the margin is ~28%, not ~37%.
+
+And the model remains deterministic, so it still says nothing about the probability of an
+extreme event, which is the point of the whole exercise.
 
 ## Status
 
