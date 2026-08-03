@@ -15,6 +15,11 @@ import torch.nn as nn
 
 DRIVERS = ["bz_gsm", "by_gsm", "v_sw", "n_p", "pressure", "vbs", "newell",
            "sqrt_p", "sin_clock", "cos_clock", "f107"]
+
+# Dipole orientation and season. The Russell-McPherron effect gives equinox months 2.4x
+# the intense-storm rate of solstice months in this record, and v1 had no time input at all.
+DRIVERS_TILT = DRIVERS + ["sin_tilt", "tilt_vbs", "sin_doy", "cos_doy"]
+
 HISTORY = 24
 
 
@@ -42,23 +47,25 @@ def windows(segs: list[pd.DataFrame], horizon: int, stride: int = 3):
     return tuple(np.concatenate(a) for a in (hd, hy, fd, fy))
 
 
-def aligned_windows(segs, horizon: int = 24, stride: int = 6):
+def aligned_windows(segs, horizon: int = 24, stride: int = 6,
+                    history: int = HISTORY, drivers=None):
     """GRU windows and Burton windows over identical target steps, so the two models are
     scored on exactly the same predictions. Burton starts one step earlier because it is
     initialized from a single observation rather than an encoded history."""
+    drivers = drivers or DRIVERS
     acc = {k: [] for k in ("hd", "hy", "fd", "fy", "vbs", "sqp", "dst")}
     for s in segs:
         s = _prep(s)
-        X = np.nan_to_num(s[DRIVERS].to_numpy(np.float32))
+        X = np.nan_to_num(s[drivers].to_numpy(np.float32))
         y = s["dst"].to_numpy(np.float32)
         v, q, d = (s[c].to_numpy() for c in ("vbs", "sqrt_p", "dst"))
-        n = len(s) - HISTORY - horizon
+        n = len(s) - history - horizon
         if n <= 0:
             continue
         st = np.arange(0, n, stride)
-        hi = st[:, None] + np.arange(HISTORY)[None, :]
-        fi = st[:, None] + HISTORY + np.arange(horizon)[None, :]
-        bi = st[:, None] + HISTORY - 1 + np.arange(horizon + 1)[None, :]
+        hi = st[:, None] + np.arange(history)[None, :]
+        fi = st[:, None] + history + np.arange(horizon)[None, :]
+        bi = st[:, None] + history - 1 + np.arange(horizon + 1)[None, :]
         for k, a in [("hd", X[hi]), ("hy", y[hi]), ("fd", X[fi]), ("fy", y[fi]),
                      ("vbs", v[bi][:, :horizon]), ("sqp", q[bi]), ("dst", d[bi])]:
             acc[k].append(a)
@@ -135,7 +142,7 @@ def train(Wtr, Wva, hidden: int, st: Stats, device="cpu", epochs=30,
           batch=256, lr=3e-3, seed=0, alpha=0.0, verbose=False):
     torch.manual_seed(seed)
     tr, va = _tensors(Wtr, st, device), _tensors(Wva, st, device)
-    model = StateModel(len(DRIVERS), hidden).to(device)
+    model = StateModel(Wtr[0].shape[-1], hidden).to(device)  # infer: the feature set varies
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     n = tr[0].shape[0]

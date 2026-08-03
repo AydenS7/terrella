@@ -35,6 +35,30 @@ def load_raw(path: pathlib.Path = RAW) -> pd.DataFrame:
     return df.set_index("time").sort_index()
 
 
+# North geomagnetic pole, roughly. Its colatitude sets how far the dipole leans off the
+# rotation axis; the longitude sets the UT phase of the daily wobble.
+POLE_COLAT = np.radians(9.6)
+POLE_LON = np.radians(288.6)
+
+
+def dipole_tilt(idx: pd.DatetimeIndex) -> np.ndarray:
+    """Angle between the geomagnetic dipole and the Sun-Earth line, in radians.
+
+    Earth's dipole leans ~11 deg off the rotation axis, so its orientation relative to the
+    solar wind swings annually and daily. That angle modulates how efficiently southward
+    IMF couples in - the Russell-McPherron effect, and the reason storms cluster near the
+    equinoxes. The v1 feature set contained nothing about time of year at all.
+    """
+    doy = idx.dayofyear.to_numpy() + idx.hour.to_numpy() / 24.0
+    ut = idx.hour.to_numpy() + idx.minute.to_numpy() / 60.0
+    decl = np.radians(-23.44) * np.cos(2 * np.pi * (doy + 10) / 365.25)
+    ut_ang = np.radians(15.0 * ut)
+    return np.arcsin(
+        np.sin(decl) * np.cos(POLE_COLAT)
+        - np.cos(decl) * np.sin(POLE_COLAT) * np.cos(ut_ang - POLE_LON)
+    )
+
+
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     bz, by, v = df["bz_gsm"], df["by_gsm"], df["v_sw"]
@@ -49,6 +73,16 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df["newell"] = (v ** (4 / 3)) * (b_t ** (2 / 3)) * np.abs(np.sin(theta_c / 2)) ** (8 / 3)
 
     df["kp"] = df["kp10"] / 10.0
+
+    tilt = dipole_tilt(df.index)
+    df["tilt"] = tilt
+    df["sin_tilt"] = np.sin(tilt)
+    # Russell-McPherron: the effective southward field depends on the dipole orientation,
+    # so give the model the interaction rather than making it discover the product.
+    df["tilt_vbs"] = np.sin(tilt) * df["vbs"]
+    doy = df.index.dayofyear.to_numpy()
+    df["sin_doy"] = np.sin(2 * np.pi * doy / 365.25)
+    df["cos_doy"] = np.cos(2 * np.pi * doy / 365.25)
     return df
 
 
