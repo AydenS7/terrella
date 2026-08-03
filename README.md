@@ -96,9 +96,51 @@ the model's generative distribution rather than from memorized cases — which i
 transition is probabilistic and why calibration (spread-skill, CRPS, rank histograms) is
 a first-class requirement rather than a nice-to-have.
 
+### Splits
+
+Chronological and forward-in-time — always train on the past. The val boundary sits at
+2015 rather than 2018 because 2018–2020 was deep solar minimum; cutting later leaves val
+with 2 intense storms, too few to select on.
+
+| split | span | years | storms <−50 / <−100 / <−200 | deepest |
+|---|---|---|---|---|
+| train | 1998–2015 | 16.3 | 280 / 79 / 13 | −422 nT |
+| val | 2015–2023 | 7.9 | 107 / 14 / 1 | −234 nT |
+| test | 2023–2026 | 3.4 | 78 / 26 / 6 | **−406 nT** (Gannon) |
+
+## Baselines
+
+Everything is scored **free-running**: the state is initialized from a single observed
+Dst and then integrated forward on solar wind drivers alone, with no further
+observations. That's the regime the learned model will be judged in, so the numbers are
+directly comparable.
+
+Fitting Burton also serves as the pipeline check. The optimizer, starting from published
+values and given a 63-year record it has never seen before, recovers:
+
+| coefficient | fitted | O'Brien & McPherron (2000) |
+|---|---|---|
+| a (injection) | −4.433 | −4.4 |
+| b (pressure) | 7.434 | 7.26 |
+| c (offset) | 9.47 | 11 |
+
+That agreement is the evidence the data pipeline is sane. A sign error or unit slip
+anywhere would have shown up here.
+
+### Test set, 24h lead — RMSE in nT
+
+| model | params | all | storm <−50 | intense <−100 |
+|---|---|---|---|---|
+| persistence | 0 | 26.70 | 84.37 | 161.96 |
+| Burton (constant τ) | 5 | 13.16 | 35.34 | 69.28 |
+| **Burton–OM (τ = f(VBs))** | **5** | **11.64** | **24.70** | **46.74** |
+
+**Burton–OM is the bar.** 11.64 / 24.70 / 46.74.
+
 ## Status
 
-Early. Data survey complete, model not yet built.
+Data pipeline and low-order baselines done and validated. Dimensionality sweep in
+progress. The probabilistic model is not built yet.
 
 ## License
 
