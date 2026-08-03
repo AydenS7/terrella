@@ -15,7 +15,7 @@
     /* ordinal blue ramp — pre-load depth is a magnitude, validated --ordinal */
     --o1: #86b6ef; --o2: #5598e7; --o3: #2a78d6; --o4: #184f95;
     /* diverging poles for IMF polarity */
-    --pole-north: #2a78d6; --pole-south: #d03b3b;
+    --pole-north: #2a78d6; --pole-south: #e34948;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) .viz-root {
@@ -70,6 +70,8 @@
   }
   button[aria-pressed="true"] { color: var(--text-primary); font-weight: 600; border-color: var(--axis); }
   button:hover { color: var(--text-primary); }
+  button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  .card h2 sub { font-size: 0.78em; }
 
   .card {
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
@@ -133,7 +135,7 @@
 
   <div id="charts">
     <div class="card">
-      <h2>Solar wind driver — IMF B<tspan>z</tspan></h2>
+      <h2>Solar wind driver — IMF B<sub>z</sub></h2>
       <p class="cap">Southward field (below zero) is what opens the magnetosphere and lets energy in.</p>
       <div class="plot"><svg id="cBz" viewBox="0 0 900 170" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
