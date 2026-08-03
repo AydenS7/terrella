@@ -24,6 +24,7 @@ import json
 import pathlib
 
 import numpy as np
+import pandas as pd
 import torch
 
 from terrella import data as D
@@ -36,7 +37,19 @@ torch.set_num_threads(1)
 PRELOAD_BZ = [0.0, -3.0, -5.0, -8.0]   # 0 is the control arm
 COND_H = 24
 STORM_H = 72
-VIZ_STORM = "2024-05-10"               # Gannon
+
+# Deepest storms that have complete solar wind drivers, across both splits. The 1989-03-14
+# event (-589 nT, deepest ever) is absent because only 43 of its 168 hours have usable
+# drivers - we know what Earth did, not what hit it.
+VIZ_STORMS = ["2003-11-20", "2024-05-10", "2001-03-31", "2024-10-10"]
+
+
+def split_of(label: str) -> str:
+    ts = pd.Timestamp(label, tz="UTC")
+    for name, (lo, hi) in D.SPLITS.items():
+        if pd.Timestamp(lo, tz="UTC") <= ts < pd.Timestamp(hi, tz="UTC"):
+            return name
+    return "pre-era"
 
 
 def find_storms(segs, thresh=-100.0, pre_h=12, n_max=24):
@@ -133,42 +146,54 @@ def main():
     if args.viz:
         from terrella import baselines as B
 
-        pick = next((s for s in storms if s["label"].startswith(VIZ_STORM[:7])), storms[0])
-        traces = {}
-        for bz in PRELOAD_BZ:
-            dst, lat = run_arm(model, st, base, base_dst, pick["drivers"], bz)
-            traces[str(bz)] = {"dst": dst.round(2).tolist(), "latent": lat.round(4).tolist()}
         bz_i, v_i, p_i = (N.DRIVERS.index(c) for c in ("bz_gsm", "v_sw", "pressure"))
-
-        # Burton-OM over the identical forward steps, for a like-for-like comparison
-        bp, _ = B.fit(*W["train"][1], tau_fn=B.tau_om)
         vbs_i, sqp_i = N.DRIVERS.index("vbs"), N.DRIVERS.index("sqrt_p")
+        bp, _ = B.fit(*W["train"][1], tau_fn=B.tau_om)
+        ba, btau, bb, bc, bec = bp
         quiet_sqp = float(np.sqrt(base["pressure"]))
-        v_seq = np.concatenate([np.zeros(COND_H), pick["drivers"][:, vbs_i]])
-        q_seq = np.concatenate([np.full(COND_H, quiet_sqp), pick["drivers"][:, sqp_i], [quiet_sqp]])
-        a, tau, b, c, ec = bp
-        s_ = base_dst - b * q_seq[0] + c
-        burton = []
-        for h in range(len(v_seq)):
-            s_ += (a * max(v_seq[h] - ec, 0.0) - s_ / B.tau_om(np.array([v_seq[h]]), tau)[0]) * B.DT
-            burton.append(s_ + b * q_seq[h + 1] - c)
-        burton = np.array(burton)
         quiet_row = driver_row(**base)
+
+        def burton_trace(drivers):
+            """Burton-OM over the identical forward steps, for a like-for-like comparison."""
+            v_seq = np.concatenate([np.zeros(COND_H), drivers[:, vbs_i]])
+            q_seq = np.concatenate([np.full(COND_H, quiet_sqp), drivers[:, sqp_i], [quiet_sqp]])
+            s_ = base_dst - bb * q_seq[0] + bc
+            out_ = []
+            for h in range(len(v_seq)):
+                tau_h = B.tau_om(np.array([v_seq[h]]), btau)[0]
+                s_ += (ba * max(v_seq[h] - bec, 0.0) - s_ / tau_h) * B.DT
+                out_.append(s_ + bb * q_seq[h + 1] - bc)
+            return np.array(out_)
+
+        picked = []
+        for want in VIZ_STORMS:
+            sm = next((s_ for s_ in storms if s_["label"] == want), None)
+            if sm is None:
+                print(f"  viz: {want} not among the {len(storms)} usable storms, skipping")
+                continue
+            traces = {}
+            for bz in PRELOAD_BZ:
+                dst, lat = run_arm(model, st, base, base_dst, sm["drivers"], bz)
+                traces[str(bz)] = {"dst": dst.round(2).tolist(), "latent": lat.round(4).tolist()}
+            burton = burton_trace(sm["drivers"])
+            picked.append({
+                "storm": sm["label"], "depth": sm["depth"], "split": split_of(sm["label"]),
+                "observed": [None] * COND_H + [round(x, 1) for x in sm["observed"]],
+                "bz": [float(quiet_row[bz_i])] * COND_H + sm["drivers"][:, bz_i].round(2).tolist(),
+                "v": [float(quiet_row[v_i])] * COND_H + sm["drivers"][:, v_i].round(1).tolist(),
+                "pressure": [float(quiet_row[p_i])] * COND_H + sm["drivers"][:, p_i].round(2).tolist(),
+                "traces": traces,
+                "burton": burton.round(2).tolist(),
+                "scoreboard": {
+                    "actual": float(min(sm["observed"])),
+                    "model": float(min(traces["0.0"]["dst"][COND_H:])),
+                    "burton": float(burton[COND_H:].min()),
+                },
+            })
+
         pathlib.Path(args.viz).write_text(json.dumps({
-            "storm": pick["label"], "depth": pick["depth"],
             "cond_h": COND_H, "storm_h": STORM_H, "dim": args.dim,
-            "preload_bz": PRELOAD_BZ,
-            "observed": [None] * COND_H + [round(x, 1) for x in pick["observed"]],
-            "bz": [float(quiet_row[bz_i])] * COND_H + pick["drivers"][:, bz_i].round(2).tolist(),
-            "v": [float(quiet_row[v_i])] * COND_H + pick["drivers"][:, v_i].round(1).tolist(),
-            "pressure": [float(quiet_row[p_i])] * COND_H + pick["drivers"][:, p_i].round(2).tolist(),
-            "traces": traces,
-            "burton": burton.round(2).tolist(),
-            "scoreboard": {
-                "actual": float(min(pick["observed"])),
-                "model": float(traces["0.0"]["dst"][COND_H:] and min(traces["0.0"]["dst"][COND_H:])),
-                "burton": float(burton[COND_H:].min()),
-            },
+            "preload_bz": PRELOAD_BZ, "alpha": args.alpha, "storms": picked,
         }))
 
     print(f"seed {args.seed}: {len(storms)} storms  "

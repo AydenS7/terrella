@@ -30,8 +30,12 @@ def main():
 
     html = TEMPLATE.read_text().replace("__DATA__", json.dumps(d, separators=(",", ":")))
     OUT.write_text(html)
-    print(f"wrote {OUT} ({OUT.stat().st_size / 1024:.0f} KB)  storm={d['storm']}  "
-          f"hero={d['hero_fig']}")
+    print(f"wrote {OUT} ({OUT.stat().st_size / 1024:.0f} KB)  hero={d['hero_fig']}")
+    for s in d["storms"]:
+        sb = s["scoreboard"]
+        print(f"  {s['storm']}  {s['split']:>5}  actual {sb['actual']:7.0f}  "
+              f"model {sb['model']:7.0f} ({sb['model'] - sb['actual']:+.0f})  "
+              f"burton {sb['burton']:7.0f} ({sb['burton'] - sb['actual']:+.0f})")
 
 
 if __name__ == "__main__":

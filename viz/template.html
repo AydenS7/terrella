@@ -81,6 +81,13 @@
   .card .cap { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 10px; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12.5px; color: var(--text-secondary); }
   .legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
+    vertical-align: 2px; margin-left: 2px;
+  }
+  .badge.held-out { color: var(--s3); }
+  .badge.seen { color: var(--s4); }
   .score { display: flex; gap: 26px; flex-wrap: wrap; margin: 2px 0 12px; }
   .score div { display: flex; flex-direction: column; gap: 1px; }
   .score .k { font-size: 11.5px; color: var(--text-secondary); letter-spacing: .02em; }
@@ -119,7 +126,8 @@
 <div class="wrap">
   <h1>Terrella — storm replay</h1>
   <p class="sub">
-    A learned simulator of Earth's magnetosphere, replaying the <b id="stormName"></b> storm.
+    A learned simulator of Earth's magnetosphere, replaying the
+    <b id="stormName"></b>&nbsp;<span id="splitBadge" class="badge"></span> storm.
     The same real solar wind is fired at the model four times, each at a magnetosphere left in a
     different starting condition by a preceding 24&nbsp;hours of driving. Everything below the first
     panel is the model's output — including the <b>hidden state</b>, which no instrument on Earth
@@ -130,6 +138,11 @@
     <div class="hero-label">Effect of pre-loading on how deep the storm gets (8 seeds, 24 storms)</div>
     <div class="hero-fig" id="heroFig">—</div>
     <div class="hero-note" id="heroNote"></div>
+  </div>
+
+  <div class="controls">
+    <span>Storm:</span>
+    <div id="stormBtns"></div>
   </div>
 
   <div class="controls">
@@ -180,14 +193,16 @@
 const D = __DATA__;
 
 const W = 900, PADL = 52, PADR = 76, PADT = 12;
-const N = D.observed.length;
+const N = D.storms[0].observed.length;
 // key off the trace object itself — Python writes "0.0" but String(0) is "0"
-const ARMS = Object.keys(D.traces).sort((a, b) => b - a);
+const ARMS = Object.keys(D.storms[0].traces).sort((a, b) => b - a);
 const ARM_COL = ["var(--o1)", "var(--o2)", "var(--o3)", "var(--o4)"];
 const LAT_COL = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
 const armName = bz => (+bz === 0 ? "quiet start" : `pre-loaded Bz ${(+bz).toFixed(0)}`);
 
 let curArm = ARMS[0];
+let curStorm = 0;
+const CS = () => D.storms[curStorm];
 const el = id => document.getElementById(id);
 const x = i => PADL + (i / (N - 1)) * (W - PADL - PADR);
 
@@ -250,45 +265,45 @@ const path = (vals, sc) => {
 };
 
 function drawBz() {
-  const h = 170, padB = 34, sc = scale(D.bz, h, padB);
+  const h = 170, padB = 34, sc = scale(CS().bz, h, padB);
   const zero = sc.y(0), g = [frame(el("cBz"), h, sc, padB, "nT")];
   g.push(`<text class="bandlab" x="${x(2)}" y="${PADT + 12}">conditioning</text>`);
   g.push(`<text class="bandlab" x="${x(D.cond_h + 2)}" y="${PADT + 12}">real storm drivers</text>`);
   // diverging fill: polarity is the meaning, so the two poles read as opposite
   let up = `M${x(0)} ${zero}`, dn = `M${x(0)} ${zero}`;
-  D.bz.forEach((v, i) => {
+  CS().bz.forEach((v, i) => {
     up += `L${x(i).toFixed(1)} ${sc.y(Math.max(v, 0)).toFixed(1)}`;
     dn += `L${x(i).toFixed(1)} ${sc.y(Math.min(v, 0)).toFixed(1)}`;
   });
   up += `L${x(N - 1)} ${zero}Z`; dn += `L${x(N - 1)} ${zero}Z`;
   g.push(`<path d="${up}" fill="var(--pole-north)" opacity=".26"/>`);
   g.push(`<path d="${dn}" fill="var(--pole-south)" opacity=".26"/>`);
-  g.push(`<path d="${path(D.bz, sc)}" fill="none" stroke="var(--text-secondary)" stroke-width="2"/>`);
+  g.push(`<path d="${path(CS().bz, sc)}" fill="none" stroke="var(--text-secondary)" stroke-width="2"/>`);
   g.push(`<line class="ax" x1="${PADL}" y1="${zero}" x2="${W - PADR}" y2="${zero}"/>`);
-  const mi = D.bz.indexOf(Math.min(...D.bz));
+  const mi = CS().bz.indexOf(Math.min(...CS().bz));
   const anchor = mi > N * 0.7 ? "end" : "start";
-  g.push(`<text class="dlab" x="${x(mi) + (anchor === "end" ? -6 : 6)}" y="${sc.y(D.bz[mi]) + 4}" text-anchor="${anchor}" fill="var(--pole-south)">${D.bz[mi].toFixed(1)} nT southward</text>`);
+  g.push(`<text class="dlab" x="${x(mi) + (anchor === "end" ? -6 : 6)}" y="${sc.y(CS().bz[mi]) + 4}" text-anchor="${anchor}" fill="var(--pole-south)">${CS().bz[mi].toFixed(1)} nT southward</text>`);
   el("cBz").innerHTML = g.join("");
   return sc;
 }
 
 function drawDst() {
   const h = 230, padB = 34;
-  const all = ARMS.flatMap(a => D.traces[a].dst)
-    .concat(D.burton, D.observed.filter(v => v !== null));
+  const all = ARMS.flatMap(a => CS().traces[a].dst)
+    .concat(CS().burton, CS().observed.filter(v => v !== null));
   const sc = scale(all, h, padB);
   const g = [frame(el("cDst"), h, sc, padB, "nT")];
   ARMS.forEach((a, k) =>
-    g.push(`<path d="${path(D.traces[a].dst, sc)}" fill="none" stroke="${ARM_COL[k]}" stroke-width="2"/>`));
-  g.push(`<path d="${path(D.burton, sc)}" fill="none" stroke="var(--s2)" stroke-width="2"/>`);
+    g.push(`<path d="${path(CS().traces[a].dst, sc)}" fill="none" stroke="${ARM_COL[k]}" stroke-width="2"/>`));
+  g.push(`<path d="${path(CS().burton, sc)}" fill="none" stroke="var(--s2)" stroke-width="2"/>`);
   spread(ARMS.map((a, k) => ({
-    y: sc.y(D.traces[a].dst[N - 1]), col: ARM_COL[k],
+    y: sc.y(CS().traces[a].dst[N - 1]), col: ARM_COL[k],
     t: +a === 0 ? "quiet" : (+a).toFixed(0),
-  })).concat([{ y: sc.y(D.burton[N - 1]), col: "var(--s2)", t: "Burton" }]),
+  })).concat([{ y: sc.y(CS().burton[N - 1]), col: "var(--s2)", t: "Burton" }]),
     12, PADT + 6, h - padB).forEach(it =>
       g.push(`<text class="dlab" x="${x(N - 1) + 6}" y="${it.y + 3.5}" fill="${it.col}">${it.t}</text>`));
-  g.push(`<path d="${path(D.observed, sc)}" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-dasharray="5 3"/>`);
-  const oi = D.observed.map((v, i) => [v, i]).filter(p => p[0] !== null);
+  g.push(`<path d="${path(CS().observed, sc)}" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-dasharray="5 3"/>`);
+  const oi = CS().observed.map((v, i) => [v, i]).filter(p => p[0] !== null);
   const deepest = oi.reduce((a, b) => (b[0] < a[0] ? b : a));
   g.push(`<circle cx="${x(deepest[1])}" cy="${sc.y(deepest[0])}" r="4" fill="var(--text-primary)" stroke="var(--surface-1)" stroke-width="2"/>`);
   g.push(`<text class="dlab" x="${x(deepest[1]) - 8}" y="${sc.y(deepest[0]) + 4}" text-anchor="end" fill="var(--text-primary)">actual ${deepest[0]} nT</text>`);
@@ -302,7 +317,7 @@ function drawDst() {
 
 function drawLat() {
   const h = 200, padB = 34;
-  const L = D.traces[curArm].latent;
+  const L = CS().traces[curArm].latent;
   const sc = scale(L.flat(), h, padB);
   const g = [frame(el("cLat"), h, sc, padB, "")];
   for (let d = 0; d < D.dim; d++) {
@@ -340,12 +355,12 @@ function bindHover(id, key, h) {
       el(cid).appendChild(ln);
     }
     const rows = [
-      ["IMF Bz", D.bz[i].toFixed(1) + " nT"],
-      ["actual Dst", D.observed[i] === null ? "—" : D.observed[i] + " nT"],
-      ...ARMS.map(a => [armName(a), D.traces[a].dst[i].toFixed(1) + " nT"]),
-      ["Burton 1975", D.burton[i].toFixed(1) + " nT"],
+      ["IMF Bz", CS().bz[i].toFixed(1) + " nT"],
+      ["actual Dst", CS().observed[i] === null ? "—" : CS().observed[i] + " nT"],
+      ...ARMS.map(a => [armName(a), CS().traces[a].dst[i].toFixed(1) + " nT"]),
+      ["Burton 1975", CS().burton[i].toFixed(1) + " nT"],
       ...Array.from({ length: D.dim }, (_, d) =>
-        ["dim " + d, D.traces[curArm].latent[i][d].toFixed(3)]),
+        ["dim " + d, CS().traces[curArm].latent[i][d].toFixed(3)]),
     ];
     tip.innerHTML = `<h4>hour ${i}${i < D.cond_h ? " · conditioning" : " · storm"}</h4>` +
       rows.map(([a, b]) => `<div class="r"><span>${a}</span><span>${b}</span></div>`).join("");
@@ -368,29 +383,46 @@ function buildTable() {
   let html = "<thead><tr>" + head.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
   for (let i = 0; i < N; i++) {
     html += "<tr><td>" + i + "</td><td>" + (i < D.cond_h ? "conditioning" : "storm") + "</td><td>" +
-      D.bz[i].toFixed(1) + "</td><td>" + (D.observed[i] === null ? "—" : D.observed[i]) + "</td>" +
-      ARMS.map(a => `<td>${D.traces[a].dst[i].toFixed(1)}</td>`).join("") +
-      `<td>${D.burton[i].toFixed(1)}</td>` +
-      Array.from({ length: D.dim }, (_, d) => `<td>${D.traces[curArm].latent[i][d].toFixed(3)}</td>`).join("") +
+      CS().bz[i].toFixed(1) + "</td><td>" + (CS().observed[i] === null ? "—" : CS().observed[i]) + "</td>" +
+      ARMS.map(a => `<td>${CS().traces[a].dst[i].toFixed(1)}</td>`).join("") +
+      `<td>${CS().burton[i].toFixed(1)}</td>` +
+      Array.from({ length: D.dim }, (_, d) => `<td>${CS().traces[curArm].latent[i][d].toFixed(3)}</td>`).join("") +
       "</tr>";
   }
   el("tbl").innerHTML = html + "</tbody>";
 }
 
-const S = D.scoreboard;
-el("score").innerHTML = [
+function updateHeader() {
+  const st_ = CS();
+  el("stormName").textContent = st_.storm;
+  const held = st_.split !== "train";
+  const badge = el("splitBadge");
+  badge.textContent = held ? "held out" : "seen in training";
+  badge.className = "badge " + (held ? "held-out" : "seen");
+  const S = st_.scoreboard;
+  el("score").innerHTML = [
   ["What actually happened", S.actual, null, "var(--text-primary)"],
   ["Learned model, 4 dimensions", S.model, S.model - S.actual, "var(--o3)"],
   ["Burton 1975, 1 dimension", S.burton, S.burton - S.actual, "var(--s2)"],
-].map(([k, v, miss, col]) =>
-  `<div><span class="k">${k}</span><span class="v" style="color:${col}">${v.toFixed(0)} nT</span>` +
-  `<span class="m">${miss === null ? "deepest point of the storm" : `undershot by ${Math.abs(miss).toFixed(0)} nT`}</span></div>`
-).join("");
+  ].map(([k, v, miss, col]) =>
+    `<div><span class="k">${k}</span><span class="v" style="color:${col}">${v.toFixed(0)} nT</span>` +
+    `<span class="m">${miss === null ? "deepest point of the storm" : `undershot by ${Math.abs(miss).toFixed(0)} nT`}</span></div>`
+  ).join("");
+}
 
-el("stormName").textContent = D.storm;
 el("condH").textContent = D.cond_h;
 el("heroFig").textContent = D.hero_fig;
 el("heroNote").textContent = D.hero_note;
+
+el("stormBtns").innerHTML = D.storms.map((s_, i) =>
+  `<button data-storm="${i}" aria-pressed="${i === curStorm}">${s_.storm} · ${s_.depth.toFixed(0)} nT</button>`).join(" ");
+el("stormBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  curStorm = +b.dataset.storm;
+  el("stormBtns").querySelectorAll("button").forEach(n =>
+    n.setAttribute("aria-pressed", n.dataset.storm === b.dataset.storm));
+  updateHeader(); redraw(); buildTable();
+});
 
 el("armBtns").innerHTML = ARMS.map(a =>
   `<button data-arm="${a}" aria-pressed="${a === curArm}">${armName(a)}</button>`).join(" ");
@@ -407,6 +439,7 @@ el("tblBtn").addEventListener("click", () => {
   el("tableCard").classList.toggle("hidden", on);
 });
 
+updateHeader();
 redraw();
 buildTable();
 bindHover("cBz"); bindHover("cDst"); bindHover("cLat");
