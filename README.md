@@ -299,9 +299,23 @@ Evaluation stays unweighted so runs are comparable. 3 seeds each, 24h lead:
 
 Deepest truth in the test windows: −389 nT.
 
-**alpha = 1 works.** The extreme undershoot more than halves (101 → 48 nT) and intense-storm
-RMSE *improves* (33.50 → 30.49), for about 3% on overall RMSE. Past alpha = 1 it stops helping
-and starts hurting — the deepest prediction plateaus while intense RMSE degrades.
+> **Correction (8-seed rerun).** The table above is 3 seeds, and 3 seeds badly understated
+> the variance on the deepest prediction: it reported 47.7 ± **2.5** nT of undershoot, while
+> 8 seeds give 63.6 ± **15.1**. Seeds 0–2 happened to be the three best runs. The honest
+> 8-seed comparison at H=4, history 24:
+>
+> | alpha | all (single) | intense (single) | **undershoot** | all (8-seed ens.) | intense (ens.) |
+> |---|---|---|---|---|---|
+> | 0 | 8.96 ± 0.35 | 36.44 ± 4.54 | **108.5** | 8.47 | 32.81 |
+> | 1 | 9.14 ± 0.33 | 34.30 ± 5.63 | **63.6 ± 15.1** | 8.56 | 30.45 |
+>
+> The conclusion survives — storm weighting cuts the undershoot by ~41% and improves
+> intense-storm RMSE — but the magnitude was overstated. Anything quoted from 3 seeds in
+> this README should be read with that in mind.
+
+**alpha = 1 works.** The extreme undershoot drops from 108.5 to 63.6 nT and intense-storm
+RMSE improves, for about 2% on overall RMSE. Past alpha = 1 it stops helping and starts
+hurting — the deepest prediction plateaus while intense RMSE degrades.
 
 **The full 63-year record does not.** It adds 72% more training windows (22,866 → 36,350) and
 delivers nothing: every metric sits within seed noise of the 1998-only equivalent, and where a
@@ -328,6 +342,39 @@ probabilistic and scoring the tail instead of the point.
 
 The pre-conditioning counterfactual was re-run on the storm-weighted model and is unchanged
 (−0.2 ± 5.8 nT vs −1.0 ± 4.7), so that conclusion does not depend on the loss.
+
+## Three hourly improvements, tested
+
+All three are resolution-independent, so whatever wins here carries into the 1-minute model
+unchanged. 8 seeds each, H=4, alpha=1, evaluated against the frozen `v1-hourly` tag.
+
+| features | history | single: all | single: intense | **8-seed ensemble: all** | **ensemble: intense** |
+|---|---|---|---|---|---|
+| base (11) | 24 | 9.14 ± 0.33 | 34.30 ± 5.63 | **8.56** | **30.45** |
+| base (11) | 48 | 9.11 ± 0.49 | 35.42 ± 7.26 | 8.43 | 30.50 |
+| tilt (15) | 24 | 9.67 ± 0.56 | 36.73 ± 6.81 | 8.94 | 31.01 |
+| tilt (15) | 48 | 9.69 ± 0.64 | 36.70 ± 6.70 | 8.93 | 30.80 |
+| tilt (15) | 72 | 9.65 ± 0.81 | 38.77 ± 8.18 | 8.79 | 31.33 |
+| tilt (15) | 96 | 9.76 ± 0.55 | 37.24 ± 6.04 | 8.94 | 30.69 |
+
+**Ensembling: free and worth it.** Averaging 8 seeds cuts overall RMSE ~6% and intense-storm
+RMSE ~11%, in every configuration. It costs nothing we weren't already spending.
+
+**Longer history: no effect.** 24, 48, 72 and 96 hours are flat. The 27-day recurrence and
+multi-day recovery arguments did not translate into usable signal at this horizon.
+
+**Dipole tilt: it hurts, and the reason is instructive.** Every tilt row is worse than its
+base counterpart, on every metric. The seasonal effect is unambiguously real — equinox months
+carry 2.42× the intense-storm rate — but **Russell–McPherron works *by rotating IMF into
+southward GSM Bz*.** We feed the model GSM Bz directly, so it already sees the *result* of the
+mechanism. The tilt features are redundant by construction and spend capacity for nothing.
+
+The general lesson: a real effect in the data is not automatically a useful feature. Check
+whether your existing inputs already encode its consequence.
+
+**Seed spread is informative.** The standard deviation across seeds correlates **+0.48 to
++0.51** with actual error, consistently across every configuration. Uncalibrated, but it means
+even a crude ensemble carries genuine uncertainty signal — an encouraging sign for v3.
 
 ## Status
 
