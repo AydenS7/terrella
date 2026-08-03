@@ -12,6 +12,8 @@ STOP = "2026-07-23T00:00:00Z"
 
 # schema order matters — see /hapi/info?id=OMNI2_H0_MRG1HR
 PARAMS = [
+    "ABS_B1800",       # |B| field magnitude (nT)
+    "BY_GSM1800",      # IMF By, GSM frame (nT) — with Bz gives the clock angle
     "BZ_GSM1800",      # IMF Bz, GSM frame (nT) — the dominant coupling driver
     "N1800",           # ion density (cm^-3)
     "V1800",           # flow speed (km/s)
