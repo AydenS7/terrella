@@ -109,8 +109,30 @@ def _tensors(W, st: Stats, device):
             torch.tensor((fy - st.ym) / st.ys, device=device))
 
 
+STORM_KNEE = 50.0    # nT; weighting starts where a storm is conventionally called moderate
+STORM_SCALE = 100.0  # nT below the knee that buys one full unit of alpha
+
+
+def storm_weights(y_norm, st: Stats, alpha: float):
+    """Upweight deep-storm targets. alpha=0 is plain MSE.
+
+    Quiet hours are ~95% of the record, so unweighted MSE is dominated by them and the
+    model is rewarded for hedging exactly where it matters. w=1 at Dst=-50, 1+alpha at
+    -150, 1+3.5*alpha at -400.
+    """
+    if alpha <= 0:
+        return None
+    y = y_norm * st.ys + st.ym
+    return 1.0 + alpha * torch.clamp(-y - STORM_KNEE, min=0.0) / STORM_SCALE
+
+
+def _loss(pred, target, w):
+    se = (pred - target) ** 2
+    return se.mean() if w is None else (w * se).sum() / w.sum()
+
+
 def train(Wtr, Wva, hidden: int, st: Stats, device="cpu", epochs=30,
-          batch=256, lr=3e-3, seed=0, verbose=False):
+          batch=256, lr=3e-3, seed=0, alpha=0.0, verbose=False):
     torch.manual_seed(seed)
     tr, va = _tensors(Wtr, st, device), _tensors(Wva, st, device)
     model = StateModel(len(DRIVERS), hidden).to(device)
@@ -118,21 +140,26 @@ def train(Wtr, Wva, hidden: int, st: Stats, device="cpu", epochs=30,
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     n = tr[0].shape[0]
     best, best_state = np.inf, None
+    w_tr_all = storm_weights(tr[3], st, alpha)
+    w_va = storm_weights(va[3], st, alpha)
 
     for ep in range(epochs):
         model.train()
         perm = torch.randperm(n, device=device)
         for i in range(0, n, batch):
             j = perm[i:i + batch]
-            loss = nn.functional.mse_loss(model(tr[0][j], tr[1][j], tr[2][j]), tr[3][j])
+            pred = model(tr[0][j], tr[1][j], tr[2][j])
+            loss = _loss(pred, tr[3][j], None if w_tr_all is None else w_tr_all[j])
             opt.zero_grad(); loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
         sched.step()
 
+        # selection uses the training objective, so a weighted run is not judged on the
+        # quiet hours it deliberately de-emphasized
         model.eval()
         with torch.no_grad():
-            vl = float(nn.functional.mse_loss(model(va[0], va[1], va[2]), va[3]))
+            vl = float(_loss(model(va[0], va[1], va[2]), va[3], w_va))
         if vl < best:
             best, best_state = vl, {k: v.clone() for k, v in model.state_dict().items()}
         if verbose and ep % 5 == 0:

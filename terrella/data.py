@@ -81,10 +81,11 @@ def segments(df: pd.DataFrame, cols=REQUIRED, max_gap_h: int = 3,
     return out
 
 
-def split_segments(segs: list[pd.DataFrame]) -> dict[str, list[pd.DataFrame]]:
+def split_segments(segs: list[pd.DataFrame], splits=None) -> dict[str, list[pd.DataFrame]]:
     """Assign each segment to a split, cutting any that straddle a boundary."""
-    out: dict[str, list[pd.DataFrame]] = {k: [] for k in SPLITS}
-    for name, (lo, hi) in SPLITS.items():
+    splits = splits or SPLITS
+    out: dict[str, list[pd.DataFrame]] = {k: [] for k in splits}
+    for name, (lo, hi) in splits.items():
         lo, hi = pd.Timestamp(lo, tz="UTC"), pd.Timestamp(hi, tz="UTC")
         for s in segs:
             piece = s[(s.index >= lo) & (s.index < hi)]
@@ -110,6 +111,9 @@ def storm_events(dst: pd.Series, thresh: float, gap_h: int = 48) -> list[float]:
 
 
 def build(era_start: str = "1998-01-01") -> dict[str, list[pd.DataFrame]]:
+    """Val and test boundaries are fixed regardless of era, so extending the training era
+    backwards leaves the test set byte-identical and the numbers comparable."""
     df = add_features(load_raw())
     df = df[df.index >= pd.Timestamp(era_start, tz="UTC")]
-    return split_segments(segments(df))
+    splits = dict(SPLITS, train=(era_start, SPLITS["train"][1]))
+    return split_segments(segments(df), splits)
