@@ -1,0 +1,388 @@
+<title>Terrella — storm replay</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    /* categorical slots 1-4 — the hidden state dimensions (identity, no order) */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    /* ordinal blue ramp — pre-load depth is a magnitude, validated --ordinal */
+    --o1: #86b6ef; --o2: #5598e7; --o3: #2a78d6; --o4: #184f95;
+    /* diverging poles for IMF polarity */
+    --pole-north: #2a78d6; --pole-south: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1: #1a1a19; --plane: #0d0d0d;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --o1: #86b6ef; --o2: #5598e7; --o3: #2a78d6; --o4: #184f95;
+      --pole-north: #3987e5; --pole-south: #e66767;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --plane: #0d0d0d;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --o1: #86b6ef; --o2: #5598e7; --o3: #2a78d6; --o4: #184f95;
+    --pole-north: #3987e5; --pole-south: #e66767;
+  }
+
+  .viz-root {
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 32px 20px 56px;
+    margin: 0;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  h1 { font-size: 25px; font-weight: 620; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-secondary); margin: 0 0 26px; max-width: 68ch; }
+  .sub b { color: var(--text-primary); font-weight: 600; }
+
+  .hero {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 22px; margin-bottom: 22px;
+  }
+  .hero-label { color: var(--text-secondary); font-size: 13px; margin-bottom: 6px; }
+  .hero-fig { font-size: 40px; font-weight: 640; line-height: 1.05; letter-spacing: -0.02em; }
+  .hero-note { color: var(--text-secondary); font-size: 13.5px; margin-top: 8px; max-width: 62ch; }
+
+  .controls {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .controls span { color: var(--text-secondary); font-size: 13px; margin-right: 2px; }
+  button {
+    font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-secondary); cursor: pointer;
+  }
+  button[aria-pressed="true"] { color: var(--text-primary); font-weight: 600; border-color: var(--axis); }
+  button:hover { color: var(--text-primary); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px 10px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card .cap { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 10px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12.5px; color: var(--text-secondary); }
+  .legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .plot { width: 100%; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; }
+  .gl { stroke: var(--grid); stroke-width: 1; }
+  .ax { stroke: var(--axis); stroke-width: 1; }
+  .tick { fill: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .dlab { font-size: 10.5px; font-weight: 600; }
+  .band { fill: var(--grid); opacity: 0.38; }
+  .bandlab { fill: var(--muted); font-size: 10.5px; }
+  .cross { stroke: var(--axis); stroke-width: 1; pointer-events: none; }
+
+  .tip {
+    position: fixed; pointer-events: none; z-index: 40; opacity: 0;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px;
+    padding: 9px 11px; font-size: 12.5px; min-width: 172px;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.16); transition: opacity .1s;
+  }
+  .tip h4 { margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .tip .r { display: flex; justify-content: space-between; gap: 14px; }
+  .tip .r span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 600; }
+  .tblwrap { max-height: 340px; overflow: auto; }
+  .hidden { display: none; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 22px; }
+</style>
+
+<div class="viz-root">
+<div class="wrap">
+  <h1>Terrella — storm replay</h1>
+  <p class="sub">
+    A learned simulator of Earth's magnetosphere, replaying the <b id="stormName"></b> storm.
+    The same real solar wind is fired at the model four times, each at a magnetosphere left in a
+    different starting condition by a preceding 24&nbsp;hours of driving. Everything below the first
+    panel is the model's output — including the <b>hidden state</b>, which no instrument on Earth
+    can measure.
+  </p>
+
+  <div class="hero">
+    <div class="hero-label">Effect of pre-loading on how deep the storm gets (8 seeds, 24 storms)</div>
+    <div class="hero-fig" id="heroFig">—</div>
+    <div class="hero-note" id="heroNote"></div>
+  </div>
+
+  <div class="controls">
+    <span>Hidden state shown for:</span>
+    <div id="armBtns"></div>
+    <button id="tblBtn" aria-pressed="false" style="margin-left:auto">Table view</button>
+  </div>
+
+  <div id="charts">
+    <div class="card">
+      <h2>Solar wind driver — IMF B<tspan>z</tspan></h2>
+      <p class="cap">Southward field (below zero) is what opens the magnetosphere and lets energy in.</p>
+      <div class="plot"><svg id="cBz" viewBox="0 0 900 170" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+
+    <div class="card">
+      <h2>Earth's response — Dst</h2>
+      <p class="cap">Lower is a bigger storm. Four model runs at increasing pre-load, plus what actually happened.</p>
+      <div class="legend" id="legDst"></div>
+      <div class="plot"><svg id="cDst" viewBox="0 0 900 230" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+
+    <div class="card">
+      <h2>The hidden state — <span id="armLabel"></span></h2>
+      <p class="cap">Four internal quantities the model invented to explain the data. Nothing told it what these should be.</p>
+      <div class="legend" id="legLat"></div>
+      <div class="plot"><svg id="cLat" viewBox="0 0 900 200" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="tableCard">
+    <h2>Table view</h2>
+    <p class="cap">Every plotted value. Hour 0 is the start of the conditioning block; the real storm begins at hour <span id="condH"></span>.</p>
+    <div class="tblwrap"><table id="tbl"></table></div>
+  </div>
+
+  <footer>
+    Data: NASA CDAWeb OMNI hourly (<code>OMNI2_H0_MRG1HR</code>). Model: 4-dimensional learned
+    state-space model, free-running on drivers alone.
+  </footer>
+</div>
+<div class="tip" id="tip"></div>
+</div>
+
+<script>
+const D = __DATA__;
+
+const W = 900, PADL = 52, PADR = 76, PADT = 12;
+const N = D.observed.length;
+// key off the trace object itself — Python writes "0.0" but String(0) is "0"
+const ARMS = Object.keys(D.traces).sort((a, b) => b - a);
+const ARM_COL = ["var(--o1)", "var(--o2)", "var(--o3)", "var(--o4)"];
+const LAT_COL = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
+const armName = bz => (+bz === 0 ? "quiet start" : `pre-loaded Bz ${(+bz).toFixed(0)}`);
+
+let curArm = ARMS[0];
+const el = id => document.getElementById(id);
+const x = i => PADL + (i / (N - 1)) * (W - PADL - PADR);
+
+function scale(vals, h, padB) {
+  const f = vals.filter(v => v !== null && isFinite(v));
+  let lo = Math.min(...f), hi = Math.max(...f);
+  const pad = (hi - lo) * 0.12 || 1;
+  lo -= pad; hi += pad;
+  return { lo, hi, y: v => PADT + (hi - v) / (hi - lo) * (h - PADT - padB) };
+}
+
+function ticks(lo, hi, n = 4) {
+  const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || mag * 10;
+  const out = [];
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) out.push(+t.toFixed(6));
+  return out;
+}
+
+function frame(svg, h, sc, padB, unit) {
+  const g = [];
+  g.push(`<rect class="band" x="${x(0)}" y="${PADT}" width="${x(D.cond_h) - x(0)}" height="${h - PADT - padB}"/>`);
+  for (const t of ticks(sc.lo, sc.hi)) {
+    const yy = sc.y(t).toFixed(1);
+    g.push(`<line class="gl" x1="${PADL}" y1="${yy}" x2="${W - PADR}" y2="${yy}"/>`);
+    g.push(`<text class="tick" x="${PADL - 8}" y="${+yy + 3.5}" text-anchor="end">${t}</text>`);
+  }
+  g.push(`<text class="tick" x="${PADL - 8}" y="${PADT - 2}" text-anchor="end">${unit}</text>`);
+  const yb = h - padB;
+  g.push(`<line class="ax" x1="${PADL}" y1="${yb}" x2="${W - PADR}" y2="${yb}"/>`);
+  for (let i = 0; i < N; i += 12) {
+    g.push(`<text class="tick" x="${x(i)}" y="${yb + 14}" text-anchor="middle">${i}</text>`);
+  }
+  g.push(`<text class="tick" x="${x(N - 1)}" y="${yb + 27}" text-anchor="end">hours</text>`);
+  return g.join("");
+}
+
+/** Push end-labels apart so converging series stay readable. */
+function spread(items, gap, top, bottom) {
+  items.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < items.length; i++)
+    if (items[i].y - items[i - 1].y < gap) items[i].y = items[i - 1].y + gap;
+  const overflow = items.length ? items[items.length - 1].y - bottom : 0;
+  if (overflow > 0) items.forEach(it => { it.y -= overflow; });
+  if (items.length && items[0].y < top) {
+    const under = top - items[0].y;
+    items.forEach(it => { it.y += under; });
+  }
+  return items;
+}
+
+const path = (vals, sc) => {
+  let d = "", pen = false;
+  vals.forEach((v, i) => {
+    if (v === null || !isFinite(v)) { pen = false; return; }
+    d += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${sc.y(v).toFixed(1)}`;
+    pen = true;
+  });
+  return d;
+};
+
+function drawBz() {
+  const h = 170, padB = 34, sc = scale(D.bz, h, padB);
+  const zero = sc.y(0), g = [frame(el("cBz"), h, sc, padB, "nT")];
+  g.push(`<text class="bandlab" x="${x(2)}" y="${PADT + 12}">conditioning</text>`);
+  g.push(`<text class="bandlab" x="${x(D.cond_h + 2)}" y="${PADT + 12}">real storm drivers</text>`);
+  // diverging fill: polarity is the meaning, so the two poles read as opposite
+  let up = `M${x(0)} ${zero}`, dn = `M${x(0)} ${zero}`;
+  D.bz.forEach((v, i) => {
+    up += `L${x(i).toFixed(1)} ${sc.y(Math.max(v, 0)).toFixed(1)}`;
+    dn += `L${x(i).toFixed(1)} ${sc.y(Math.min(v, 0)).toFixed(1)}`;
+  });
+  up += `L${x(N - 1)} ${zero}Z`; dn += `L${x(N - 1)} ${zero}Z`;
+  g.push(`<path d="${up}" fill="var(--pole-north)" opacity=".26"/>`);
+  g.push(`<path d="${dn}" fill="var(--pole-south)" opacity=".26"/>`);
+  g.push(`<path d="${path(D.bz, sc)}" fill="none" stroke="var(--text-secondary)" stroke-width="2"/>`);
+  g.push(`<line class="ax" x1="${PADL}" y1="${zero}" x2="${W - PADR}" y2="${zero}"/>`);
+  const mi = D.bz.indexOf(Math.min(...D.bz));
+  const anchor = mi > N * 0.7 ? "end" : "start";
+  g.push(`<text class="dlab" x="${x(mi) + (anchor === "end" ? -6 : 6)}" y="${sc.y(D.bz[mi]) + 4}" text-anchor="${anchor}" fill="var(--pole-south)">${D.bz[mi].toFixed(1)} nT southward</text>`);
+  el("cBz").innerHTML = g.join("");
+  return sc;
+}
+
+function drawDst() {
+  const h = 230, padB = 34;
+  const all = ARMS.flatMap(a => D.traces[a].dst).concat(D.observed.filter(v => v !== null));
+  const sc = scale(all, h, padB);
+  const g = [frame(el("cDst"), h, sc, padB, "nT")];
+  ARMS.forEach((a, k) =>
+    g.push(`<path d="${path(D.traces[a].dst, sc)}" fill="none" stroke="${ARM_COL[k]}" stroke-width="2"/>`));
+  spread(ARMS.map((a, k) => ({
+    y: sc.y(D.traces[a].dst[N - 1]), col: ARM_COL[k],
+    t: +a === 0 ? "quiet" : (+a).toFixed(0),
+  })), 12, PADT + 6, h - padB).forEach(it =>
+    g.push(`<text class="dlab" x="${x(N - 1) + 6}" y="${it.y + 3.5}" fill="${it.col}">${it.t}</text>`));
+  g.push(`<path d="${path(D.observed, sc)}" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-dasharray="5 3"/>`);
+  const oi = D.observed.map((v, i) => [v, i]).filter(p => p[0] !== null);
+  const deepest = oi.reduce((a, b) => (b[0] < a[0] ? b : a));
+  g.push(`<circle cx="${x(deepest[1])}" cy="${sc.y(deepest[0])}" r="4" fill="var(--text-primary)" stroke="var(--surface-1)" stroke-width="2"/>`);
+  g.push(`<text class="dlab" x="${x(deepest[1]) - 8}" y="${sc.y(deepest[0]) + 4}" text-anchor="end" fill="var(--text-primary)">actual ${deepest[0]} nT</text>`);
+  el("cDst").innerHTML = g.join("");
+  el("legDst").innerHTML = ARMS.map((a, k) =>
+    `<span><i style="background:${ARM_COL[k]}"></i>${armName(a)}</span>`).join("") +
+    `<span><i style="background:var(--text-primary)"></i>what actually happened</span>`;
+  return sc;
+}
+
+function drawLat() {
+  const h = 200, padB = 34;
+  const L = D.traces[curArm].latent;
+  const sc = scale(L.flat(), h, padB);
+  const g = [frame(el("cLat"), h, sc, padB, "")];
+  for (let d = 0; d < D.dim; d++) {
+    g.push(`<path d="${path(L.map(r => r[d]), sc)}" fill="none" stroke="${LAT_COL[d]}" stroke-width="2"/>`);
+  }
+  spread(Array.from({ length: D.dim }, (_, d) => ({
+    y: sc.y(L[N - 1][d]), col: LAT_COL[d], t: `dim ${d}`,
+  })), 12, PADT + 6, h - padB).forEach(it =>
+    g.push(`<text class="dlab" x="${x(N - 1) + 6}" y="${it.y + 3.5}" fill="${it.col}">${it.t}</text>`));
+  el("cLat").innerHTML = g.join("");
+  el("legLat").innerHTML = Array.from({ length: D.dim }, (_, d) =>
+    `<span><i style="background:${LAT_COL[d]}"></i>dimension ${d}</span>`).join("");
+  el("armLabel").textContent = armName(curArm);
+  return sc;
+}
+
+let SC = {};
+function redraw() { SC = { bz: drawBz(), dst: drawDst(), lat: drawLat() }; }
+
+// hover: shared crosshair + one tooltip across all three panels
+const tip = el("tip");
+function bindHover(id, key, h) {
+  const svg = el(id);
+  const move = ev => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX ?? ev.touches?.[0]?.clientX) - r.left) / r.width * W;
+    let i = Math.round((px - PADL) / (W - PADL - PADR) * (N - 1));
+    i = Math.max(0, Math.min(N - 1, i));
+    document.querySelectorAll(".cross").forEach(n => n.remove());
+    for (const [cid, ch] of [["cBz", 170], ["cDst", 230], ["cLat", 200]]) {
+      const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      ln.setAttribute("class", "cross");
+      ln.setAttribute("x1", x(i)); ln.setAttribute("x2", x(i));
+      ln.setAttribute("y1", PADT); ln.setAttribute("y2", ch - 34);
+      el(cid).appendChild(ln);
+    }
+    const rows = [
+      ["IMF Bz", D.bz[i].toFixed(1) + " nT"],
+      ["actual Dst", D.observed[i] === null ? "—" : D.observed[i] + " nT"],
+      ...ARMS.map((a, k) => [armName(a), D.traces[a].dst[i].toFixed(1) + " nT"]),
+      ...Array.from({ length: D.dim }, (_, d) =>
+        ["dim " + d, D.traces[curArm].latent[i][d].toFixed(3)]),
+    ];
+    tip.innerHTML = `<h4>hour ${i}${i < D.cond_h ? " · conditioning" : " · storm"}</h4>` +
+      rows.map(([a, b]) => `<div class="r"><span>${a}</span><span>${b}</span></div>`).join("");
+    tip.style.opacity = 1;
+    const tw = tip.offsetWidth, tp = ev.clientX + 16 + tw > innerWidth ? ev.clientX - tw - 16 : ev.clientX + 16;
+    tip.style.left = tp + "px";
+    tip.style.top = Math.min(ev.clientY + 14, innerHeight - tip.offsetHeight - 10) + "px";
+  };
+  svg.addEventListener("mousemove", move);
+  svg.addEventListener("touchmove", move, { passive: true });
+  svg.addEventListener("mouseleave", () => {
+    tip.style.opacity = 0;
+    document.querySelectorAll(".cross").forEach(n => n.remove());
+  });
+}
+
+function buildTable() {
+  const head = ["hour", "phase", "Bz nT", "actual Dst", ...ARMS.map(a => armName(a)),
+    ...Array.from({ length: D.dim }, (_, d) => `dim ${d} (${armName(curArm)})`)];
+  let html = "<thead><tr>" + head.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
+  for (let i = 0; i < N; i++) {
+    html += "<tr><td>" + i + "</td><td>" + (i < D.cond_h ? "conditioning" : "storm") + "</td><td>" +
+      D.bz[i].toFixed(1) + "</td><td>" + (D.observed[i] === null ? "—" : D.observed[i]) + "</td>" +
+      ARMS.map(a => `<td>${D.traces[a].dst[i].toFixed(1)}</td>`).join("") +
+      Array.from({ length: D.dim }, (_, d) => `<td>${D.traces[curArm].latent[i][d].toFixed(3)}</td>`).join("") +
+      "</tr>";
+  }
+  el("tbl").innerHTML = html + "</tbody>";
+}
+
+el("stormName").textContent = D.storm;
+el("condH").textContent = D.cond_h;
+el("heroFig").textContent = D.hero_fig;
+el("heroNote").textContent = D.hero_note;
+
+el("armBtns").innerHTML = ARMS.map(a =>
+  `<button data-arm="${a}" aria-pressed="${a === curArm}">${armName(a)}</button>`).join(" ");
+el("armBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  curArm = b.dataset.arm;
+  el("armBtns").querySelectorAll("button").forEach(n =>
+    n.setAttribute("aria-pressed", n.dataset.arm === curArm));
+  drawLat(); buildTable();
+});
+el("tblBtn").addEventListener("click", () => {
+  const on = el("tblBtn").getAttribute("aria-pressed") === "true";
+  el("tblBtn").setAttribute("aria-pressed", String(!on));
+  el("tableCard").classList.toggle("hidden", on);
+});
+
+redraw();
+buildTable();
+bindHover("cBz"); bindHover("cDst"); bindHover("cLat");
+</script>
