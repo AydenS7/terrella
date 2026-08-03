@@ -137,10 +137,97 @@ anywhere would have shown up here.
 
 **Burton–OM is the bar.** 11.64 / 24.70 / 46.74.
 
+## How many dimensions does it need?
+
+A GRU run free on drivers with hidden size *H* is a learned state-space model with *H*
+dimensions, so sweeping *H* traces the dimensionality curve. Burton sits at H=1. Scored on
+identical windows, 2 seeds, 24h lead, test set:
+
+| model | params | all | storm <−50 | intense <−100 |
+|---|---|---|---|---|
+| Burton–OM (H=1) | 5 | 11.84 | 26.72 | 50.68 |
+| GRU H=1 | 184 | 11.31 | 25.18 | 44.80 |
+| GRU H=2 | 315 | 10.23 | 24.51 | 40.95 |
+| **GRU H=4** | **613** | **8.57** | **19.04** | **31.67** |
+| GRU H=8 | 1,353 | 8.60 | 19.22 | 32.56 |
+| GRU H=16 | 3,409 | 8.76 | 20.68 | 36.63 |
+| GRU H=32 | 9,825 | 8.46 | 19.45 | 34.63 |
+| GRU H=64 | 31,873 | 8.37 | 19.41 | 32.56 |
+
+**The curve elbows hard at H=4 and then goes flat.** Going 1 → 2 → 4 buys 26% on intense
+storms; going 4 → 64 buys nothing, despite 52× the parameters. H=4 has the best
+intense-storm score in the entire sweep.
+
+Two separate things are visible here. At fixed H=1, replacing Burton's hand-written
+transition with a learned one is worth ~12% on intense storms — that's nonlinearity, not
+dimensionality. The 1 → 4 gain on top of that is dimensionality.
+
+## Are those four dimensions physics, or noise?
+
+`scripts/probe.py`, three tests.
+
+**1. Impulse response.** Hold the model at a quiet equilibrium (median conditions during
+|Dst| < 20), inject 6 hours of Bz = −10 nT, release. Predicted Dst goes −14 → **−52 nT**,
+a textbook moderate storm from a textbook moderate driver. Nobody asked for that; it falls
+out of a model trained only to minimize error.
+
+The four dimensions respond on visibly different timescales:
+
+| dim | peak at | e-folding decay |
+|---|---|---|
+| 0 | +5 h | 19 h |
+| 2 | +7 h | 20 h |
+| 1 | +20 h | 31 h |
+| 3 | +77 h | did not decay in 72 h |
+
+Fast responders that decay in ~19–20 h, a slower one at 31 h, and a very slow integrator.
+That is structure, not four copies of the same thing.
+
+**2. Correlation with observables the model never saw.** The model is trained on Dst alone;
+AE and Kp are never shown to it, in training or at inference. Raw correlations look strong,
+but AE and Kp are themselves correlated with Dst (−0.551 and −0.596), so a dimension that
+merely tracks Dst would inherit an AE correlation for free. Partialling Dst out:
+
+| dim | AE ǀ Dst | Kp ǀ Dst |
+|---|---|---|
+| 0 | −0.326 | −0.478 |
+| 1 | +0.183 | −0.048 |
+| **2** | **−0.403** | **−0.482** |
+| 3 | −0.196 | −0.137 |
+
+They survive. The latent state carries information about auroral and planetary activity
+that Dst alone does not explain. Dimension 2 is the interesting one: it has the *weakest*
+raw Dst correlation (−0.187) and the *strongest* partial AE correlation, which is what a
+substorm-like, Dst-orthogonal quantity would look like.
+
+**3. Ablation.** Freeze one dimension at its mean during rollout:
+
+| frozen dim | test RMSE | degradation |
+|---|---|---|
+| none | 8.77 | — |
+| 0 | 20.55 | +134.3% |
+| 3 | 12.70 | +44.8% |
+| 1 | 10.74 | +22.5% |
+| 2 | 10.02 | +14.3% |
+
+All four are load-bearing. If the extra dimensions were noise, freezing them would cost
+nothing.
+
+## What is and isn't established
+
+Established: four dimensions beat one, decisively and on held-out data from a different
+solar cycle; all four carry weight; the impulse response is physically sensible; the state
+knows things about AE and Kp that Dst alone doesn't explain.
+
+Not established: that the decay constants match the ring current specifically — 19–31 h sits
+at and above the usual 7–20 h band. Partial correlations of 0.3–0.5 are suggestive, not
+decisive. The probe is a single seed. And the model is deterministic, so it still cannot say
+anything about the probability of an extreme event, which is the point of the whole exercise.
+
 ## Status
 
-Data pipeline and low-order baselines done and validated. Dimensionality sweep in
-progress. The probabilistic model is not built yet.
+Data pipeline, baselines, dimensionality sweep, and latent probe done. Next: storm-weighted
+loss, then the probabilistic transition and calibration.
 
 ## License
 
