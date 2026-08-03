@@ -81,6 +81,11 @@
   .card .cap { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 10px; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12.5px; color: var(--text-secondary); }
   .legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .score { display: flex; gap: 26px; flex-wrap: wrap; margin: 2px 0 12px; }
+  .score div { display: flex; flex-direction: column; gap: 1px; }
+  .score .k { font-size: 11.5px; color: var(--text-secondary); letter-spacing: .02em; }
+  .score .v { font-size: 21px; font-weight: 630; line-height: 1.1; }
+  .score .m { font-size: 11.5px; color: var(--text-secondary); }
   .plot { width: 100%; overflow-x: auto; }
   svg { display: block; width: 100%; height: auto; }
   .gl { stroke: var(--grid); stroke-width: 1; }
@@ -142,7 +147,9 @@
 
     <div class="card">
       <h2>Earth's response — Dst</h2>
-      <p class="cap">Lower is a bigger storm. Four model runs at increasing pre-load, plus what actually happened.</p>
+      <p class="cap">Lower is a bigger storm. Four model runs at increasing pre-load, Burton's 1975
+        equation for comparison, and what actually happened.</p>
+      <div class="score" id="score"></div>
       <div class="legend" id="legDst"></div>
       <div class="plot"><svg id="cDst" viewBox="0 0 900 230" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
@@ -267,16 +274,19 @@ function drawBz() {
 
 function drawDst() {
   const h = 230, padB = 34;
-  const all = ARMS.flatMap(a => D.traces[a].dst).concat(D.observed.filter(v => v !== null));
+  const all = ARMS.flatMap(a => D.traces[a].dst)
+    .concat(D.burton, D.observed.filter(v => v !== null));
   const sc = scale(all, h, padB);
   const g = [frame(el("cDst"), h, sc, padB, "nT")];
   ARMS.forEach((a, k) =>
     g.push(`<path d="${path(D.traces[a].dst, sc)}" fill="none" stroke="${ARM_COL[k]}" stroke-width="2"/>`));
+  g.push(`<path d="${path(D.burton, sc)}" fill="none" stroke="var(--s2)" stroke-width="2"/>`);
   spread(ARMS.map((a, k) => ({
     y: sc.y(D.traces[a].dst[N - 1]), col: ARM_COL[k],
     t: +a === 0 ? "quiet" : (+a).toFixed(0),
-  })), 12, PADT + 6, h - padB).forEach(it =>
-    g.push(`<text class="dlab" x="${x(N - 1) + 6}" y="${it.y + 3.5}" fill="${it.col}">${it.t}</text>`));
+  })).concat([{ y: sc.y(D.burton[N - 1]), col: "var(--s2)", t: "Burton" }]),
+    12, PADT + 6, h - padB).forEach(it =>
+      g.push(`<text class="dlab" x="${x(N - 1) + 6}" y="${it.y + 3.5}" fill="${it.col}">${it.t}</text>`));
   g.push(`<path d="${path(D.observed, sc)}" fill="none" stroke="var(--text-primary)" stroke-width="2" stroke-dasharray="5 3"/>`);
   const oi = D.observed.map((v, i) => [v, i]).filter(p => p[0] !== null);
   const deepest = oi.reduce((a, b) => (b[0] < a[0] ? b : a));
@@ -285,6 +295,7 @@ function drawDst() {
   el("cDst").innerHTML = g.join("");
   el("legDst").innerHTML = ARMS.map((a, k) =>
     `<span><i style="background:${ARM_COL[k]}"></i>${armName(a)}</span>`).join("") +
+    `<span><i style="background:var(--s2)"></i>Burton 1975 (quiet start)</span>` +
     `<span><i style="background:var(--text-primary)"></i>what actually happened</span>`;
   return sc;
 }
@@ -331,7 +342,8 @@ function bindHover(id, key, h) {
     const rows = [
       ["IMF Bz", D.bz[i].toFixed(1) + " nT"],
       ["actual Dst", D.observed[i] === null ? "—" : D.observed[i] + " nT"],
-      ...ARMS.map((a, k) => [armName(a), D.traces[a].dst[i].toFixed(1) + " nT"]),
+      ...ARMS.map(a => [armName(a), D.traces[a].dst[i].toFixed(1) + " nT"]),
+      ["Burton 1975", D.burton[i].toFixed(1) + " nT"],
       ...Array.from({ length: D.dim }, (_, d) =>
         ["dim " + d, D.traces[curArm].latent[i][d].toFixed(3)]),
     ];
@@ -351,18 +363,29 @@ function bindHover(id, key, h) {
 }
 
 function buildTable() {
-  const head = ["hour", "phase", "Bz nT", "actual Dst", ...ARMS.map(a => armName(a)),
+  const head = ["hour", "phase", "Bz nT", "actual Dst", ...ARMS.map(a => armName(a)), "Burton 1975",
     ...Array.from({ length: D.dim }, (_, d) => `dim ${d} (${armName(curArm)})`)];
   let html = "<thead><tr>" + head.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
   for (let i = 0; i < N; i++) {
     html += "<tr><td>" + i + "</td><td>" + (i < D.cond_h ? "conditioning" : "storm") + "</td><td>" +
       D.bz[i].toFixed(1) + "</td><td>" + (D.observed[i] === null ? "—" : D.observed[i]) + "</td>" +
       ARMS.map(a => `<td>${D.traces[a].dst[i].toFixed(1)}</td>`).join("") +
+      `<td>${D.burton[i].toFixed(1)}</td>` +
       Array.from({ length: D.dim }, (_, d) => `<td>${D.traces[curArm].latent[i][d].toFixed(3)}</td>`).join("") +
       "</tr>";
   }
   el("tbl").innerHTML = html + "</tbody>";
 }
+
+const S = D.scoreboard;
+el("score").innerHTML = [
+  ["What actually happened", S.actual, null, "var(--text-primary)"],
+  ["Learned model, 4 dimensions", S.model, S.model - S.actual, "var(--o3)"],
+  ["Burton 1975, 1 dimension", S.burton, S.burton - S.actual, "var(--s2)"],
+].map(([k, v, miss, col]) =>
+  `<div><span class="k">${k}</span><span class="v" style="color:${col}">${v.toFixed(0)} nT</span>` +
+  `<span class="m">${miss === null ? "deepest point of the storm" : `undershot by ${Math.abs(miss).toFixed(0)} nT`}</span></div>`
+).join("");
 
 el("stormName").textContent = D.storm;
 el("condH").textContent = D.cond_h;

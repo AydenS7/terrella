@@ -129,12 +129,28 @@ def main():
     pathlib.Path(args.out).write_text(json.dumps(out, indent=1))
 
     if args.viz:
+        from terrella import baselines as B
+
         pick = next((s for s in storms if s["label"].startswith(VIZ_STORM[:7])), storms[0])
         traces = {}
         for bz in PRELOAD_BZ:
             dst, lat = run_arm(model, st, base, base_dst, pick["drivers"], bz)
             traces[str(bz)] = {"dst": dst.round(2).tolist(), "latent": lat.round(4).tolist()}
         bz_i, v_i, p_i = (N.DRIVERS.index(c) for c in ("bz_gsm", "v_sw", "pressure"))
+
+        # Burton-OM over the identical forward steps, for a like-for-like comparison
+        bp, _ = B.fit(*W["train"][1], tau_fn=B.tau_om)
+        vbs_i, sqp_i = N.DRIVERS.index("vbs"), N.DRIVERS.index("sqrt_p")
+        quiet_sqp = float(np.sqrt(base["pressure"]))
+        v_seq = np.concatenate([np.zeros(COND_H), pick["drivers"][:, vbs_i]])
+        q_seq = np.concatenate([np.full(COND_H, quiet_sqp), pick["drivers"][:, sqp_i], [quiet_sqp]])
+        a, tau, b, c, ec = bp
+        s_ = base_dst - b * q_seq[0] + c
+        burton = []
+        for h in range(len(v_seq)):
+            s_ += (a * max(v_seq[h] - ec, 0.0) - s_ / B.tau_om(np.array([v_seq[h]]), tau)[0]) * B.DT
+            burton.append(s_ + b * q_seq[h + 1] - c)
+        burton = np.array(burton)
         quiet_row = driver_row(**base)
         pathlib.Path(args.viz).write_text(json.dumps({
             "storm": pick["label"], "depth": pick["depth"],
@@ -145,6 +161,12 @@ def main():
             "v": [float(quiet_row[v_i])] * COND_H + pick["drivers"][:, v_i].round(1).tolist(),
             "pressure": [float(quiet_row[p_i])] * COND_H + pick["drivers"][:, p_i].round(2).tolist(),
             "traces": traces,
+            "burton": burton.round(2).tolist(),
+            "scoreboard": {
+                "actual": float(min(pick["observed"])),
+                "model": float(traces["0.0"]["dst"][COND_H:] and min(traces["0.0"]["dst"][COND_H:])),
+                "burton": float(burton[COND_H:].min()),
+            },
         }))
 
     print(f"seed {args.seed}: {len(storms)} storms  "
