@@ -28,6 +28,15 @@ def main():
         f"completely, so this is mostly generic exponential forgetting, not a discovery."
     )
 
+    # The ensemble MEAN is shallower at the peak than its members - averaging models is
+    # itself a form of hedging. The band's lower edge is the risk-relevant number, so
+    # surface it rather than letting the mean quietly understate the storm.
+    for st_ in d["storms"]:
+        t = st_["traces"]["0.0"]
+        ch = d["cond_h"]
+        st_["scoreboard"]["model_low"] = float(
+            min(v - sd for v, sd in zip(t["dst"][ch:], t["sd"][ch:])))
+
     html = TEMPLATE.read_text().replace("__DATA__", json.dumps(d, separators=(",", ":")))
     OUT.write_text(html)
     print(f"wrote {OUT} ({OUT.stat().st_size / 1024:.0f} KB)  hero={d['hero_fig']}")

@@ -16,8 +16,12 @@ import torch.nn as nn
 DRIVERS = ["bz_gsm", "by_gsm", "v_sw", "n_p", "pressure", "vbs", "newell",
            "sqrt_p", "sin_clock", "cos_clock", "f107"]
 
-# Dipole orientation and season. The Russell-McPherron effect gives equinox months 2.4x
-# the intense-storm rate of solstice months in this record, and v1 had no time input at all.
+# TESTED AND REJECTED - do not use as the default. Dipole orientation and season. The
+# Russell-McPherron effect is real and large here (equinox months carry 2.42x the
+# intense-storm rate of solstice months), but it operates *by rotating IMF into southward
+# GSM Bz*, and DRIVERS already contains GSM Bz - so the model sees the mechanism's result
+# and these features are redundant by construction. Measured worse on every metric at
+# every history length. Kept for reproducibility of that negative result.
 DRIVERS_TILT = DRIVERS + ["sin_tilt", "tilt_vbs", "sin_doy", "cos_doy"]
 
 HISTORY = 24

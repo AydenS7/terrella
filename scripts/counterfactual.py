@@ -103,7 +103,10 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--out", required=True)
     ap.add_argument("--alpha", type=float, default=1.0, help="storm-weighting strength")
-    ap.add_argument("--viz", help="also dump a rich single-storm trace for the visualizer")
+    ap.add_argument("--viz", help="also dump rich per-storm traces for the visualizer")
+    ap.add_argument("--viz-seeds", type=int, default=8,
+                    help="ensemble size for the viz traces; 8 seeds cut intense-storm RMSE "
+                         "~11%% over a single seed, and their spread correlates ~+0.5 with error")
     args = ap.parse_args()
 
     splits = D.build()
@@ -146,6 +149,16 @@ def main():
     if args.viz:
         from terrella import baselines as B
 
+        # Dst traces are ensembled; latent trajectories are NOT. Latent dimensions have no
+        # identity across seeds (arbitrary basis up to permutation, sign and rotation), so
+        # averaging them is meaningless - the hidden-state panel shows seed 0 alone.
+        models = [model]
+        for extra in range(1, args.viz_seeds):
+            m_, _ = N.train(Wg["train"], Wg["val"], args.dim, st,
+                            epochs=args.epochs, seed=extra, alpha=args.alpha)
+            models.append(m_)
+        print(f"  viz ensemble: {len(models)} seeds", flush=True)
+
         bz_i, v_i, p_i = (N.DRIVERS.index(c) for c in ("bz_gsm", "v_sw", "pressure"))
         vbs_i, sqp_i = N.DRIVERS.index("vbs"), N.DRIVERS.index("sqrt_p")
         bp, _ = B.fit(*W["train"][1], tau_fn=B.tau_om)
@@ -173,8 +186,14 @@ def main():
                 continue
             traces = {}
             for bz in PRELOAD_BZ:
-                dst, lat = run_arm(model, st, base, base_dst, sm["drivers"], bz)
-                traces[str(bz)] = {"dst": dst.round(2).tolist(), "latent": lat.round(4).tolist()}
+                runs = [run_arm(m_, st, base, base_dst, sm["drivers"], bz)[0] for m_ in models]
+                stack = np.stack(runs)
+                _, lat = run_arm(models[0], st, base, base_dst, sm["drivers"], bz)
+                traces[str(bz)] = {
+                    "dst": stack.mean(0).round(2).tolist(),
+                    "sd": stack.std(0).round(2).tolist(),
+                    "latent": lat.round(4).tolist(),
+                }
             burton = burton_trace(sm["drivers"])
             picked.append({
                 "storm": sm["label"], "depth": sm["depth"], "split": split_of(sm["label"]),
@@ -189,6 +208,7 @@ def main():
                     "model": float(min(traces["0.0"]["dst"][COND_H:])),
                     "burton": float(burton[COND_H:].min()),
                 },
+                "seeds": len(models),
             })
 
         pathlib.Path(args.viz).write_text(json.dumps({

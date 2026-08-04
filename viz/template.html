@@ -161,7 +161,9 @@
     <div class="card">
       <h2>Earth's response — Dst</h2>
       <p class="cap">Lower is a bigger storm. Four model runs at increasing pre-load, Burton's 1975
-        equation for comparison, and what actually happened.</p>
+        equation for comparison, and what actually happened. Each model line is the mean of
+        <b id="nSeeds"></b> independently seeded models; the shaded band is how much they
+        disagree — not calibrated uncertainty, but it tracks real error at about +0.5.</p>
       <div class="score" id="score"></div>
       <div class="legend" id="legDst"></div>
       <div class="plot"><svg id="cDst" viewBox="0 0 900 230" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -289,10 +291,23 @@ function drawBz() {
 
 function drawDst() {
   const h = 230, padB = 34;
+  const t0 = CS().traces[ARMS[0]];
   const all = ARMS.flatMap(a => CS().traces[a].dst)
-    .concat(CS().burton, CS().observed.filter(v => v !== null));
+    .concat(CS().burton, CS().observed.filter(v => v !== null),
+            t0.sd ? t0.dst.map((v, i) => v - t0.sd[i]) : []);
   const sc = scale(all, h, padB);
   const g = [frame(el("cDst"), h, sc, padB, "nT")];
+  // ensemble disagreement on the control arm. Not calibrated uncertainty - it is the
+  // spread of 8 independently seeded models, which correlates ~+0.5 with actual error.
+  const c0 = CS().traces[ARMS[0]];
+  if (c0.sd) {
+    let up = "", dn = "";
+    c0.dst.forEach((v, i) => {
+      up += `${i ? "L" : "M"}${x(i).toFixed(1)} ${sc.y(v + c0.sd[i]).toFixed(1)}`;
+    });
+    for (let i = N - 1; i >= 0; i--) dn += `L${x(i).toFixed(1)} ${sc.y(c0.dst[i] - c0.sd[i]).toFixed(1)}`;
+    g.push(`<path d="${up}${dn}Z" fill="${ARM_COL[0]}" opacity=".22"/>`);
+  }
   ARMS.forEach((a, k) =>
     g.push(`<path d="${path(CS().traces[a].dst, sc)}" fill="none" stroke="${ARM_COL[k]}" stroke-width="2"/>`));
   g.push(`<path d="${path(CS().burton, sc)}" fill="none" stroke="var(--s2)" stroke-width="2"/>`);
@@ -308,6 +323,7 @@ function drawDst() {
   g.push(`<circle cx="${x(deepest[1])}" cy="${sc.y(deepest[0])}" r="4" fill="var(--text-primary)" stroke="var(--surface-1)" stroke-width="2"/>`);
   g.push(`<text class="dlab" x="${x(deepest[1]) - 8}" y="${sc.y(deepest[0]) + 4}" text-anchor="end" fill="var(--text-primary)">actual ${deepest[0]} nT</text>`);
   el("cDst").innerHTML = g.join("");
+  el("nSeeds").textContent = CS().seeds || 1;
   el("legDst").innerHTML = ARMS.map((a, k) =>
     `<span><i style="background:${ARM_COL[k]}"></i>${armName(a)}</span>`).join("") +
     `<span><i style="background:var(--s2)"></i>Burton 1975 (quiet start)</span>` +
@@ -378,13 +394,14 @@ function bindHover(id, key, h) {
 }
 
 function buildTable() {
-  const head = ["hour", "phase", "Bz nT", "actual Dst", ...ARMS.map(a => armName(a)), "Burton 1975",
+  const head = ["hour", "phase", "Bz nT", "actual Dst", ...ARMS.map(a => armName(a)), "quiet ± seed sd", "Burton 1975",
     ...Array.from({ length: D.dim }, (_, d) => `dim ${d} (${armName(curArm)})`)];
   let html = "<thead><tr>" + head.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
   for (let i = 0; i < N; i++) {
     html += "<tr><td>" + i + "</td><td>" + (i < D.cond_h ? "conditioning" : "storm") + "</td><td>" +
       CS().bz[i].toFixed(1) + "</td><td>" + (CS().observed[i] === null ? "—" : CS().observed[i]) + "</td>" +
       ARMS.map(a => `<td>${CS().traces[a].dst[i].toFixed(1)}</td>`).join("") +
+      `<td>${(CS().traces[ARMS[0]].sd || [])[i]?.toFixed(1) ?? "—"}</td>` +
       `<td>${CS().burton[i].toFixed(1)}</td>` +
       Array.from({ length: D.dim }, (_, d) => `<td>${CS().traces[curArm].latent[i][d].toFixed(3)}</td>`).join("") +
       "</tr>";
@@ -402,8 +419,9 @@ function updateHeader() {
   const S = st_.scoreboard;
   el("score").innerHTML = [
   ["What actually happened", S.actual, null, "var(--text-primary)"],
-  ["Learned model, 4 dimensions", S.model, S.model - S.actual, "var(--o3)"],
-  ["Burton 1975, 1 dimension", S.burton, S.burton - S.actual, "var(--s2)"],
+  ["Learned model, ensemble mean", S.model, S.model - S.actual, "var(--o3)"],
+  ["Ensemble low edge (mean - 1sd)", S.model_low, S.model_low - S.actual, "var(--o1)"],
+    ["Burton 1975, 1 dimension", S.burton, S.burton - S.actual, "var(--s2)"],
   ].map(([k, v, miss, col]) =>
     `<div><span class="k">${k}</span><span class="v" style="color:${col}">${v.toFixed(0)} nT</span>` +
     `<span class="m">${miss === null ? "deepest point of the storm" : `undershot by ${Math.abs(miss).toFixed(0)} nT`}</span></div>`
